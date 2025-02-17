@@ -1,0 +1,291 @@
+// In VehiclePawn.h
+#include "Net/UnrealNetwork.h"
+
+UCLASS()
+class POLICECHASE_API AVehiclePawn : public AWheeledVehicle
+{
+    GENERATED_BODY()
+
+public:
+    AVehiclePawn();
+
+    // Verfolgungsgrad: 1 bis 5 Sterne
+    UPROPERTY(Replicated, VisibleAnywhere, BlueprintReadOnly, Category = "Verfolgung")
+    int32 PursuitLevel;
+
+    // Funktion, um den Verfolgungsgrad zu erhöhen
+    void IncreasePursuitLevel();
+
+    // Replikationsregeln
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+private:
+    FTimerHandle TimerHandle_PursuitLevel;
+};
+
+
+
+
+
+#include "VehiclePawn.h"
+#include "TimerManager.h"
+
+AVehiclePawn::AVehiclePawn()
+{
+    // Standardwert setzen
+    PursuitLevel = 1;
+
+    // Damit diese Variable über das Netzwerk verteilt wird
+    bReplicates = true;
+}
+
+void AVehiclePawn::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    // Timer: Ruft alle 30 Sekunden die Funktion IncreasePursuitLevel auf
+    if (HasAuthority())
+    {
+        GetWorldTimerManager().SetTimer(
+            TimerHandle_PursuitLevel,
+            this, 
+            &AVehiclePawn::IncreasePursuitLevel, 
+            30.0f, 
+            true
+        );
+    }
+}
+
+void AVehiclePawn::IncreasePursuitLevel()
+{
+    if (PursuitLevel < 5)
+    {
+        PursuitLevel++;
+        // Optional: Hier können Sound/Animation oder visuelles Feedback hinzugefügt werden
+    }
+}
+
+void AVehiclePawn::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+    DOREPLIFETIME(AVehiclePawn, PursuitLevel);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "PoliceActor.generated.h"
+
+UCLASS()
+class POLICECHASE_API APoliceActor : public AActor
+{
+    GENERATED_BODY()
+    
+public:    
+    APoliceActor();
+
+    // Statisches Mesh, um die Polizei darzustellen
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Komponenten")
+    UStaticMeshComponent* MeshComp;
+
+protected:
+    virtual void BeginPlay() override;
+
+public:    
+    virtual void Tick(float DeltaTime) override;
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#include "PoliceActor.h"
+#include "Kismet/GameplayStatics.h"
+#include "VehiclePawn.h"
+
+APoliceActor::APoliceActor()
+{
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Erstelle und setze das Static Mesh
+    MeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComp"));
+    RootComponent = MeshComp;
+}
+
+void APoliceActor::BeginPlay()
+{
+    Super::BeginPlay();
+}
+
+void APoliceActor::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    // Finde den Spieler (Fahrzeug)
+    TArray<AActor*> FoundVehicles;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AVehiclePawn::StaticClass(), FoundVehicles);
+
+    for (AActor* Actor : FoundVehicles)
+    {
+        AVehiclePawn* Vehicle = Cast<AVehiclePawn>(Actor);
+        if (Vehicle)
+        {
+            float Distance = FVector::Dist(GetActorLocation(), Vehicle->GetActorLocation());
+            // Wenn das Fahrzeug nahe genug ist (zum Beispiel < 500 Einheiten)
+            if (Distance < 500.0f)
+            {
+                // Debug-Ausgabe: Fahrzeug gefangen
+                UE_LOG(LogTemp, Warning, TEXT("Fahrzeug gefangen!"));
+                // Hier kannst du weitere Logik einbauen (z. B. den Spieler ausschalten)
+            }
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/GameModeBase.h"
+#include "PoliceChaseGameMode.generated.h"
+
+UCLASS()
+class POLICECHASE_API APoliceChaseGameMode : public AGameModeBase
+{
+    GENERATED_BODY()
+    
+public:
+    APoliceChaseGameMode();
+
+    // Funktion, die regelmäßig die Spielerzahl prüft
+    virtual void Tick(float DeltaTime) override;
+
+protected:
+    virtual void BeginPlay() override;
+
+    // Funktion, um den Spielstart zu initiieren, wenn beispielsweise 10 Spieler verbunden sind
+    void CheckPlayerCount();
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#include "PoliceChaseGameMode.h"
+#include "GameFramework/GameStateBase.h"
+#include "GameFramework/PlayerState.h"
+#include "Engine/World.h"
+
+APoliceChaseGameMode::APoliceChaseGameMode()
+{
+    PrimaryActorTick.bCanEverTick = true;
+}
+
+void APoliceChaseGameMode::BeginPlay()
+{
+    Super::BeginPlay();
+}
+
+void APoliceChaseGameMode::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    CheckPlayerCount();
+}
+
+void APoliceChaseGameMode::CheckPlayerCount()
+{
+    if (GameState)
+    {
+        int32 AlivePlayers = 0;
+        // Gehe alle PlayerStates durch, um zu zählen
+        for (APlayerState* PS : GameState->PlayerArray)
+        {
+            if (PS && !PS->bIsSpectator)
+            {
+                AlivePlayers++;
+            }
+        }
+
+        // Beispiel: Starte das Spiel, wenn 10 Spieler verbunden sind
+        if (AlivePlayers >= 10)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Alle 10 Spieler sind verbunden. Spielstart!"));
+            // Hier kannst du Logik einbauen, um den Spielstart zu initiieren.
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
